@@ -2,17 +2,12 @@ const builtin = @import("builtin");
 const std = @import("std");
 const win32 = @import("win32");
 const w = win32.base;
-const d3d12 = win32.d3d12;
 const common = @import("common");
-const gr = common.graphics;
 const lib = common.library;
-const c = common.c;
-const vm = common.vectormath;
+const r = @import("renderer.zig");
+
 const hrPanic = lib.hrPanic;
 const hrPanicOnFail = lib.hrPanicOnFail;
-
-pub export var D3D12SDKVersion: u32 = 4;
-pub export var D3D12SDKPath: [*:0]const u8 = ".\\d3d12\\";
 
 pub fn main() anyerror!void {
     const window_name = "zrenderer";
@@ -29,8 +24,13 @@ pub fn main() anyerror!void {
     }
     const gpa_allocator = gpa_allocator_state.allocator();
 
-    _ = lib.initWindow(gpa_allocator, window_name, window_width, window_height) catch unreachable;
+    const window = lib.initWindow(gpa_allocator, window_name, window_width, window_height) catch unreachable;
     defer lib.deinitWindow(gpa_allocator);
+
+    var renderer = r.Renderer.init(gpa_allocator, window);
+    defer renderer.deinit();
+
+    renderer.loadScene(gpa_allocator, "content/models/test_level.gltf");
 
     while (true) {
         var message = std.mem.zeroes(w.user32.MSG);
@@ -41,6 +41,8 @@ pub fn main() anyerror!void {
             if (message.message == w.user32.WM_QUIT) {
                 break;
             }
+        } else {
+            renderer.render();
         }
     }
 }

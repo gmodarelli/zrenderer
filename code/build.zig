@@ -2,6 +2,29 @@ const std = @import("std");
 const Builder = std.build.Builder;
 const Pkg = std.build.Pkg;
 
+fn makeDxcCmd(
+    comptime input_path: []const u8,
+    comptime entry_point: []const u8,
+    comptime output_filename: []const u8,
+    comptime profile: []const u8,
+    comptime define: []const u8,
+) [9][]const u8 {
+    // NOTE(mziulek): PIX reports warning about non-retail shader version. Why?
+    const shader_ver = "6_6";
+    const shader_dir = "content/shaders/";
+    return [9][]const u8{
+        "external/zig-gamedev/external/bin/dxc/dxc.exe",
+        input_path,
+        "/E " ++ entry_point,
+        "/Fo " ++ shader_dir ++ output_filename,
+        "/T " ++ profile ++ "_" ++ shader_ver,
+        if (define.len == 0) "" else "/D " ++ define,
+        "/WX",
+        "/Ges",
+        "/O3",
+    };
+}
+
 pub fn build(b: *Builder) void {
     b.installFile("external/zig-gamedev/external/bin/d3d12/D3D12Core.dll", "bin/d3d12/D3D12Core.dll");
     b.installFile("external/zig-gamedev/external/bin/d3d12/D3D12Core.pdb", "bin/d3d12/D3D12Core.pdb");
@@ -11,6 +34,15 @@ pub fn build(b: *Builder) void {
         .{ .source_dir = "content", .install_dir = .{ .custom = "" }, .install_subdir = "bin/content" },
     );
     b.getInstallStep().dependOn(&install_content_step.step);
+
+    const dxc_step = b.step("dxc", "Build shaders");
+
+    var dxc_command = makeDxcCmd("external/zig-gamedev/libs/common/common.hlsl", "vsImGui", "imgui.vs.cso", "vs", "PSO__IMGUI");
+    dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
+    dxc_command = makeDxcCmd("external/zig-gamedev/libs/common/common.hlsl", "psImGui", "imgui.ps.cso", "ps", "PSO__IMGUI");
+    dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
+
+    install_content_step.step.dependOn(dxc_step);
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
