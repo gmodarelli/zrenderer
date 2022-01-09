@@ -33,7 +33,7 @@ const PBRMaterial = struct {
     normal_tex_index: u32,
 };
 
-const Texture = struct {
+const PersistentResourceHandle = struct {
     resource: gr.ResourceHandle,
     persistent_descriptor: gr.PersistentDescriptor,
 };
@@ -63,14 +63,14 @@ pub const Scene = struct {
     indices: std.ArrayList(u32),
     meshes: std.ArrayList(Mesh),
     materials: std.ArrayList(PBRMaterial),
-    textures: std.ArrayList(Texture),
+    textures: std.ArrayList(PersistentResourceHandle),
 
     pub fn loadFromGltf(arena: std.mem.Allocator, file_path: []const u8, grfx: *gr.GraphicsContext) Scene {
         var all_meshes = std.ArrayList(Mesh).init(arena);
         var all_vertices = std.ArrayList(Vertex).init(arena);
         var all_indices = std.ArrayList(u32).init(arena);
         var all_materials = std.ArrayList(PBRMaterial).init(arena);
-        var all_textures = std.ArrayList(Texture).init(arena);
+        var all_textures = std.ArrayList(PersistentResourceHandle).init(arena);
 
         var indices = std.ArrayList(u32).init(arena);
         var positions = std.ArrayList(Vec3).init(arena);
@@ -210,6 +210,26 @@ pub const Scene = struct {
             all_textures.appendAssumeCapacity(.{ .resource = resource, .persistent_descriptor = persistent_descriptor });
         }
 
+        // NOTE(gmodarelli): We're replacing the indices that index into the textures array list, with their
+        // respective GPU descriptor indices
+        var i: u32 = 0;
+        while (i < all_materials.items.len) : (i += 1) {
+            var tex_index = all_materials.items[i].base_color_tex_index;
+            if (tex_index >= 0 and tex_index < all_textures.items.len) {
+                all_materials.items[i].base_color_tex_index = all_textures.items[tex_index].persistent_descriptor.index;
+            }
+
+            tex_index = all_materials.items[i].metallic_roughness_tex_index;
+            if (tex_index >= 0 and tex_index < all_textures.items.len) {
+                all_materials.items[i].metallic_roughness_tex_index = all_textures.items[tex_index].persistent_descriptor.index;
+            }
+
+            tex_index = all_materials.items[i].normal_tex_index;
+            if (tex_index >= 0 and tex_index < all_textures.items.len) {
+                all_materials.items[i].normal_tex_index = all_textures.items[tex_index].persistent_descriptor.index;
+            }
+        }
+
         return .{
             .vertices = all_vertices,
             .indices = all_indices,
@@ -247,6 +267,7 @@ pub const Renderer = struct {
 
     vertex_buffer: gr.ResourceHandle,
     index_buffer: gr.ResourceHandle,
+    material_buffer: PersistentResourceHandle,
 
     pub fn init(gpa_allocator: std.mem.Allocator, window: w.HWND) Renderer {
         var grfx = gr.GraphicsContext.init(window);
@@ -339,6 +360,7 @@ pub const Renderer = struct {
             .title_tfmt = title_tfmt,
             .vertex_buffer = undefined,
             .index_buffer = undefined,
+            .material_buffer = undefined,
             .current_scene = undefined,
         };
     }
@@ -395,8 +417,40 @@ pub const Renderer = struct {
             break :blk index_buffer;
         };
 
+        const material_buffer = blk: {
+            var material_buffer = r.grfx.createCommittedResource(
+                .DEFAULT,
+                d3d12.HEAP_FLAG_NONE,
+                &d3d12.RESOURCE_DESC.initBuffer(r.current_scene.materials.items.len * @sizeOf(PBRMaterial)),
+                d3d12.RESOURCE_STATE_COPY_DEST,
+                null,
+            ) catch |err| hrPanic(err);
+            const upload = r.grfx.allocateUploadBufferRegion(PBRMaterial, @intCast(u32, r.current_scene.materials.items.len));
+            for (r.current_scene.materials.items) |material, i| {
+                upload.cpu_slice[i] = material;
+            }
+            r.grfx.cmdlist.CopyBufferRegion(
+                r.grfx.getResource(material_buffer),
+                0,
+                upload.buffer,
+                upload.buffer_offset,
+                upload.cpu_slice.len * @sizeOf(@TypeOf(upload.cpu_slice[0])),
+            );
+            // r.grfx.addTransitionBarrier(vertex_buffer, d3d12.RESOURCE_STATE_);
+
+            const persistent_descriptor = r.grfx.allocatePersistentGpuDescriptors(1);
+            const srv_desc = d3d12.SHADER_RESOURCE_VIEW_DESC.initStructuredBuffer(0, @intCast(u32, r.current_scene.materials.items.len), @sizeOf(PBRMaterial));
+            r.grfx.device.CreateShaderResourceView(r.grfx.getResource(material_buffer), &srv_desc, persistent_descriptor.cpu_handle);
+
+            break :blk .{
+                .resource = material_buffer,
+                .persistent_descriptor = persistent_descriptor,
+            };
+        };
+
         r.vertex_buffer = vertex_buffer;
         r.index_buffer = index_buffer;
+        r.material_buffer = material_buffer;
 
         r.grfx.endFrame();
     }
@@ -408,6 +462,7 @@ pub const Renderer = struct {
         _ = r.grfx.releaseResource(r.depth_texture.resource);
         _ = r.grfx.releaseResource(r.vertex_buffer);
         _ = r.grfx.releaseResource(r.index_buffer);
+        _ = r.grfx.releaseResource(r.material_buffer.resource);
 
         _ = r.brush.Release();
         _ = r.info_tfmt.Release();
