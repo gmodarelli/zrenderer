@@ -77,6 +77,11 @@ pub const Scene = struct {
         var normals = std.ArrayList(Vec3).init(arena);
         var texcoords0 = std.ArrayList(Vec2).init(arena);
         var tangents = std.ArrayList(Vec4).init(arena);
+        defer indices.deinit();
+        defer positions.deinit();
+        defer normals.deinit();
+        defer texcoords0.deinit();
+        defer tangents.deinit();
 
         const data = lib.parseAndLoadGltfFile(file_path);
         defer c.cgltf_free(data);
@@ -218,6 +223,12 @@ pub const Scene = struct {
         for (s.textures.items) |texture| {
             _ = grfx.releaseResource(texture.resource);
         }
+
+        s.meshes.deinit();
+        s.vertices.deinit();
+        s.indices.deinit();
+        s.materials.deinit();
+        s.textures.deinit();
     }
 };
 
