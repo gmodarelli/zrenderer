@@ -58,6 +58,38 @@ const Mesh = struct {
     material_index: u32,
 };
 
+
+const CameraType = enum {
+    Perspective,
+    Orthographic,
+};
+
+const PerspectiveCameraData = struct {
+    aspect_ratio: f32,
+    yfov: f32,
+    znear: f32,
+    zfar: f32,
+};
+
+const OrthographicCameraData = struct {
+    xmag: f32,
+    ymag: f32,
+    znear: f32,
+    zfar: f32,
+};
+
+const Camera = struct {
+    type: CameraType,
+    u: union {
+        perspective: PerspectiveCameraData,
+        orthographic: OrthographicCameraData,
+    },
+    position: Vec3,
+    roll: f32,
+    pitch: f32,
+    yaw: f32,
+};
+
 pub const Scene = struct {
     vertices: std.ArrayList(Vertex),
     indices: std.ArrayList(u32),
@@ -65,18 +97,86 @@ pub const Scene = struct {
     materials: std.ArrayList(PBRMaterial),
     textures: std.ArrayList(PersistentResourceHandle),
 
-    pub fn loadFromGltf(arena: std.mem.Allocator, file_path: []const u8, grfx: *gr.GraphicsContext) Scene {
-        var all_meshes = std.ArrayList(Mesh).init(arena);
-        var all_vertices = std.ArrayList(Vertex).init(arena);
-        var all_indices = std.ArrayList(u32).init(arena);
-        var all_materials = std.ArrayList(PBRMaterial).init(arena);
-        var all_textures = std.ArrayList(PersistentResourceHandle).init(arena);
+    main_camera: Camera,
 
-        var indices = std.ArrayList(u32).init(arena);
-        var positions = std.ArrayList(Vec3).init(arena);
-        var normals = std.ArrayList(Vec3).init(arena);
-        var texcoords0 = std.ArrayList(Vec2).init(arena);
-        var tangents = std.ArrayList(Vec4).init(arena);
+    pub fn loadMainCamera(data: *c.cgltf_data) Camera {
+        // Try to load camera's info
+        assert(data.cameras_count == 1);
+        var main_camera: Camera = undefined;
+        const camera_info = data.cameras[0];
+        if (camera_info.type == c.cgltf_camera_type_perspective) {
+            main_camera.type = .Perspective;
+            const perspective = camera_info.data.perspective;
+            main_camera.u = .{
+                .perspective = PerspectiveCameraData{
+                    .aspect_ratio = if (perspective.has_aspect_ratio != 0) perspective.aspect_ratio else 1.0,
+                    .yfov = perspective.yfov,
+                    .znear = perspective.znear,
+                    .zfar = if (perspective.has_zfar != 0) perspective.zfar else 1000.0,
+                },
+            }; 
+        } else {
+            main_camera.type = .Orthographic;
+            main_camera.u = .{
+                .orthographic = OrthographicCameraData{
+                    .xmag = camera_info.data.orthographic.xmag,
+                    .ymag = camera_info.data.orthographic.ymag,
+                    .zfar = camera_info.data.orthographic.zfar,
+                    .znear = camera_info.data.orthographic.znear,
+                },
+            };
+        }
+        // Find camera transform node
+        var camera_found = false;
+        var node_index: u32 = 0;
+        var camera_name = "Camera";
+        while (node_index < data.scene.*.nodes_count) : (node_index += 1) {
+            const name = std.mem.span(data.scene.*.nodes[node_index].*.name);
+
+            if (std.mem.eql(u8, name, camera_name)) {
+                camera_found = true;
+                const node = data.scene.*.nodes[node_index].*;
+                assert(node.has_translation != 0);
+                assert(node.has_rotation != 0);
+
+                main_camera.position = Vec3.init(node.translation[0], node.translation[1], node.translation[2]);
+
+                var a = 2.0 * (node.rotation[3] * node.rotation[0] + node.rotation[1] * node.rotation[2]);
+                var b = 1.0 - 2.0 * (node.rotation[0] * node.rotation[0] + node.rotation[1] * node.rotation[1]);
+                var pitch = std.math.atan2(f32, a, b);
+
+                var yaw = 2.0 * (node.rotation[3] * node.rotation[1] - node.rotation[2] * node.rotation[0]);
+                yaw = math.clamp(yaw, -1.0, 1.0);
+                yaw = std.math.asin(yaw);
+
+                a = 2.0 * (node.rotation[3] * node.rotation[2] + node.rotation[0] * node.rotation[1]);
+                b = 1.0 - 2.0 * (node.rotation[1] * node.rotation[1] + node.rotation[2] * node.rotation[2]);
+                var roll = std.math.atan2(f32, a, b);
+
+                main_camera.pitch = pitch;
+                main_camera.yaw = yaw;
+                main_camera.roll = roll;
+
+                break;
+            }
+        }
+
+        assert(camera_found);
+        return main_camera;
+    }
+
+    pub fn loadFromGltf(gpa_allocator: std.mem.Allocator, file_path: []const u8, grfx: *gr.GraphicsContext) Scene {
+        var all_meshes = std.ArrayList(Mesh).init(gpa_allocator);
+        var all_vertices = std.ArrayList(Vertex).init(gpa_allocator);
+        var all_indices = std.ArrayList(u32).init(gpa_allocator);
+        var all_materials = std.ArrayList(PBRMaterial).init(gpa_allocator);
+        var all_textures = std.ArrayList(PersistentResourceHandle).init(gpa_allocator);
+
+        var indices = std.ArrayList(u32).init(gpa_allocator);
+        var positions = std.ArrayList(Vec3).init(gpa_allocator);
+        var normals = std.ArrayList(Vec3).init(gpa_allocator);
+        var texcoords0 = std.ArrayList(Vec2).init(gpa_allocator);
+        var tangents = std.ArrayList(Vec4).init(gpa_allocator);
         defer indices.deinit();
         defer positions.deinit();
         defer normals.deinit();
@@ -85,6 +185,8 @@ pub const Scene = struct {
 
         const data = lib.parseAndLoadGltfFile(file_path);
         defer c.cgltf_free(data);
+
+        const main_camera = Scene.loadMainCamera(data);
 
         const num_meshes = @intCast(u32, data.meshes_count);
         var mesh_index: u32 = 0;
@@ -207,6 +309,11 @@ pub const Scene = struct {
             const persistent_descriptor = grfx.allocatePersistentGpuDescriptors(1);
             grfx.device.CreateShaderResourceView(grfx.getResource(resource), null, persistent_descriptor.cpu_handle);
 
+            var path16: [128]u16 = undefined;
+            const len = std.unicode.utf8ToUtf16Le(&path16, path) catch unreachable;
+            path16[len] = 0;
+            _ = grfx.getResource(resource).SetName(@ptrCast([*:0]const u16, &path16));
+
             all_textures.appendAssumeCapacity(.{ .resource = resource, .persistent_descriptor = persistent_descriptor });
         }
 
@@ -231,6 +338,7 @@ pub const Scene = struct {
         }
 
         return .{
+            .main_camera = main_camera,
             .vertices = all_vertices,
             .indices = all_indices,
             .meshes = all_meshes,
@@ -268,6 +376,8 @@ pub const Renderer = struct {
     vertex_buffer: gr.ResourceHandle,
     index_buffer: gr.ResourceHandle,
     material_buffer: PersistentResourceHandle,
+
+    mesh_pbr_pso: gr.PipelineHandle,
 
     pub fn init(gpa_allocator: std.mem.Allocator, window: w.HWND) Renderer {
         var grfx = gr.GraphicsContext.init(window);
@@ -324,6 +434,32 @@ pub const Renderer = struct {
         hrPanicOnFail(title_tfmt.SetTextAlignment(.CENTER));
         hrPanicOnFail(title_tfmt.SetParagraphAlignment(.CENTER));
 
+        const mesh_pbr_pso = blk: {
+            const input_layout_desc = [_]d3d12.INPUT_ELEMENT_DESC{
+                d3d12.INPUT_ELEMENT_DESC.init("POSITION", 0, .R32G32B32_FLOAT, 0, 0, .PER_VERTEX_DATA, 0),
+                d3d12.INPUT_ELEMENT_DESC.init("_Normal", 0, .R32G32B32_FLOAT, 0, 12, .PER_VERTEX_DATA, 0),
+                d3d12.INPUT_ELEMENT_DESC.init("_Texcoords", 0, .R32G32_FLOAT, 0, 24, .PER_VERTEX_DATA, 0),
+                d3d12.INPUT_ELEMENT_DESC.init("_Tangent", 0, .R32G32B32A32_FLOAT, 0, 32, .PER_VERTEX_DATA, 0),
+            };
+            var pso_desc = d3d12.GRAPHICS_PIPELINE_STATE_DESC.initDefault();
+            pso_desc.DSVFormat = .D32_FLOAT;
+            pso_desc.InputLayout = .{
+                .pInputElementDescs = &input_layout_desc,
+                .NumElements = input_layout_desc.len,
+            };
+            pso_desc.RTVFormats[0] = .R8G8B8A8_UNORM;
+            pso_desc.NumRenderTargets = 1;
+            pso_desc.BlendState.RenderTarget[0].RenderTargetWriteMask = 0xf;
+            pso_desc.PrimitiveTopologyType = .TRIANGLE;
+
+            break :blk grfx.createGraphicsShaderPipeline(
+                arena_allocator,
+                &pso_desc,
+                "content/shaders/mesh_pbr.vs.cso",
+                "content/shaders/mesh_pbr.ps.cso",
+            );
+        };
+
         const depth_texture = .{
             .resource = grfx.createCommittedResource(
                 .DEFAULT,
@@ -358,6 +494,7 @@ pub const Renderer = struct {
             .brush = brush,
             .info_tfmt = info_tfmt,
             .title_tfmt = title_tfmt,
+            .mesh_pbr_pso = mesh_pbr_pso,
             .vertex_buffer = undefined,
             .index_buffer = undefined,
             .material_buffer = undefined,
@@ -365,11 +502,11 @@ pub const Renderer = struct {
         };
     }
 
-    pub fn loadScene(r: *Renderer, arena: std.mem.Allocator, file_path: []const u8) void {
+    pub fn loadScene(r: *Renderer, gpa_allocator: std.mem.Allocator, file_path: []const u8) void {
         r.grfx.finishGpuCommands();
         r.grfx.beginFrame();
 
-        r.current_scene = Scene.loadFromGltf(arena, file_path, &r.grfx);
+        r.current_scene = Scene.loadFromGltf(gpa_allocator, file_path, &r.grfx);
 
         const vertex_buffer = blk: {
             var vertex_buffer = r.grfx.createCommittedResource(
@@ -391,6 +528,7 @@ pub const Renderer = struct {
                 upload.cpu_slice.len * @sizeOf(@TypeOf(upload.cpu_slice[0])),
             );
             r.grfx.addTransitionBarrier(vertex_buffer, d3d12.RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+            _ = r.grfx.getResource(vertex_buffer).SetName(L("Vertex Buffer"));
             break :blk vertex_buffer;
         };
 
@@ -414,6 +552,7 @@ pub const Renderer = struct {
                 upload.cpu_slice.len * @sizeOf(@TypeOf(upload.cpu_slice[0])),
             );
             r.grfx.addTransitionBarrier(index_buffer, d3d12.RESOURCE_STATE_INDEX_BUFFER);
+            _ = r.grfx.getResource(index_buffer).SetName(L("Index Buffer"));
             break :blk index_buffer;
         };
 
@@ -436,11 +575,13 @@ pub const Renderer = struct {
                 upload.buffer_offset,
                 upload.cpu_slice.len * @sizeOf(@TypeOf(upload.cpu_slice[0])),
             );
-            // r.grfx.addTransitionBarrier(vertex_buffer, d3d12.RESOURCE_STATE_);
+            // r.grfx.addTransitionBarrier(material_buffer, d3d12.RESOURCE_STATE_);
 
             const persistent_descriptor = r.grfx.allocatePersistentGpuDescriptors(1);
             const srv_desc = d3d12.SHADER_RESOURCE_VIEW_DESC.initStructuredBuffer(0, @intCast(u32, r.current_scene.materials.items.len), @sizeOf(PBRMaterial));
             r.grfx.device.CreateShaderResourceView(r.grfx.getResource(material_buffer), &srv_desc, persistent_descriptor.cpu_handle);
+
+            _ = r.grfx.getResource(material_buffer).SetName(L("Materials Buffer"));
 
             break :blk .{
                 .resource = material_buffer,
@@ -459,6 +600,7 @@ pub const Renderer = struct {
         r.grfx.finishGpuCommands();
         r.current_scene.deinit(&r.grfx);
 
+        _ = r.grfx.releasePipeline(r.mesh_pbr_pso);
         _ = r.grfx.releaseResource(r.depth_texture.resource);
         _ = r.grfx.releaseResource(r.vertex_buffer);
         _ = r.grfx.releaseResource(r.index_buffer);
@@ -493,6 +635,9 @@ pub const Renderer = struct {
             null,
         );
         grfx.cmdlist.ClearDepthStencilView(r.depth_texture.view, d3d12.CLEAR_FLAG_DEPTH, 1.0, 0, 0, null);
+
+        // Draw Current Scene
+
 
         // r.gui.draw(grfx);
 
