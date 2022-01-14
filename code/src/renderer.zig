@@ -187,22 +187,21 @@ pub const Scene = struct {
     }
 
     pub fn loadFromGltf(gpa_allocator: std.mem.Allocator, file_path: []const u8, grfx: *gr.GraphicsContext) Scene {
+        var arena_allocator_state = std.heap.ArenaAllocator.init(gpa_allocator);
+        defer arena_allocator_state.deinit();
+        const arena_allocator = arena_allocator_state.allocator();
+
         var all_meshes = std.ArrayList(Mesh).init(gpa_allocator);
         var all_vertices = std.ArrayList(Vertex).init(gpa_allocator);
         var all_indices = std.ArrayList(u32).init(gpa_allocator);
         var all_materials = std.ArrayList(PBRMaterial).init(gpa_allocator);
         var all_textures = std.ArrayList(PersistentResourceHandle).init(gpa_allocator);
 
-        var indices = std.ArrayList(u32).init(gpa_allocator);
-        var positions = std.ArrayList(Vec3).init(gpa_allocator);
-        var normals = std.ArrayList(Vec3).init(gpa_allocator);
-        var texcoords0 = std.ArrayList(Vec2).init(gpa_allocator);
-        var tangents = std.ArrayList(Vec4).init(gpa_allocator);
-        defer indices.deinit();
-        defer positions.deinit();
-        defer normals.deinit();
-        defer texcoords0.deinit();
-        defer tangents.deinit();
+        var indices = std.ArrayList(u32).init(arena_allocator);
+        var positions = std.ArrayList(Vec3).init(arena_allocator);
+        var normals = std.ArrayList(Vec3).init(arena_allocator);
+        var texcoords0 = std.ArrayList(Vec2).init(arena_allocator);
+        var tangents = std.ArrayList(Vec4).init(arena_allocator);
 
         const data = lib.parseAndLoadGltfFile(file_path);
         defer c.cgltf_free(data);
@@ -320,6 +319,8 @@ pub const Scene = struct {
         var image_index: u32 = 0;
         all_textures.ensureTotalCapacity(num_images + 1) catch unreachable;
 
+        var mipgen_rgba8 = gr.MipmapGenerator.init(arena_allocator, grfx, .R8G8B8A8_UNORM);
+
         while (image_index < num_images) : (image_index += 1) {
             const image = &data.images[image_index];
 
@@ -330,6 +331,9 @@ pub const Scene = struct {
             const persistent_descriptor = grfx.allocatePersistentGpuDescriptors(1);
             grfx.device.CreateShaderResourceView(grfx.getResource(resource), null, persistent_descriptor.cpu_handle);
 
+            mipgen_rgba8.generateMipmaps(grfx, resource);
+            grfx.addTransitionBarrier(resource, d3d12.RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
             var path16: [128]u16 = undefined;
             const len = std.unicode.utf8ToUtf16Le(&path16, path) catch unreachable;
             path16[len] = 0;
@@ -337,6 +341,11 @@ pub const Scene = struct {
 
             all_textures.appendAssumeCapacity(.{ .resource = resource, .persistent_descriptor = persistent_descriptor });
         }
+
+        grfx.flushResourceBarriers();
+        grfx.finishGpuCommands();
+
+        mipgen_rgba8.deinit(grfx);
 
         // NOTE(gmodarelli): We're replacing the indices that index into the textures array list, with their
         // respective GPU descriptor indices
@@ -525,10 +534,12 @@ pub const Renderer = struct {
 
     pub fn loadScene(r: *Renderer, gpa_allocator: std.mem.Allocator, file_path: []const u8) void {
         r.grfx.finishGpuCommands();
+
         r.grfx.beginFrame();
-
         r.current_scene = Scene.loadFromGltf(gpa_allocator, file_path, &r.grfx);
+        r.grfx.endFrame();
 
+        r.grfx.beginFrame();
         const vertex_buffer = blk: {
             var vertex_buffer = r.grfx.createCommittedResource(
                 .DEFAULT,

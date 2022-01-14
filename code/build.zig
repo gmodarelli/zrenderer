@@ -42,6 +42,15 @@ pub fn build(b: *Builder) void {
     dxc_command = makeDxcCmd("external/zig-gamedev/libs/common/common.hlsl", "psImGui", "imgui.ps.cso", "ps", "PSO__IMGUI");
     dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
 
+    dxc_command = makeDxcCmd(
+        "external/zig-gamedev/libs/common/common.hlsl",
+        "csGenerateMipmaps",
+        "generate_mipmaps.cs.cso",
+        "cs",
+        "PSO__GENERATE_MIPMAPS",
+    );
+    dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
+
     dxc_command = makeDxcCmd("src/pbr.hlsl", "vsMeshPbr", "mesh_pbr.vs.cso", "vs", "PSO__MESH_PBR");
     dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
     dxc_command = makeDxcCmd("src/pbr.hlsl", "psMeshPbr", "mesh_pbr.ps.cso", "ps", "PSO__MESH_PBR");
