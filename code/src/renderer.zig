@@ -58,6 +58,22 @@ const Mesh = struct {
     material_index: u32,
 };
 
+const SceneConst = struct {
+    world_to_clip: Mat4,
+    camera_position: Vec3,
+};
+
+const DrawConst = struct {
+    object_to_world: Mat4,
+};
+
+const MaterialIndexConst = struct {
+    material_index: u32,
+};
+
+const SRVIndexConst = struct {
+    material_buffer_index: u32,
+};
 
 const CameraType = enum {
     Perspective,
@@ -85,6 +101,7 @@ const Camera = struct {
         orthographic: OrthographicCameraData,
     },
     position: Vec3,
+    forward: Vec3,
     roll: f32,
     pitch: f32,
     yaw: f32,
@@ -139,8 +156,9 @@ pub const Scene = struct {
                 assert(node.has_translation != 0);
                 assert(node.has_rotation != 0);
 
-                main_camera.position = Vec3.init(node.translation[0], node.translation[1], node.translation[2]);
+                main_camera.position = Vec3.init(node.translation[0], node.translation[1], -node.translation[2]);
 
+                // TODO: Maybe add this to Quat?
                 var a = 2.0 * (node.rotation[3] * node.rotation[0] + node.rotation[1] * node.rotation[2]);
                 var b = 1.0 - 2.0 * (node.rotation[0] * node.rotation[0] + node.rotation[1] * node.rotation[1]);
                 var pitch = std.math.atan2(f32, a, b);
@@ -153,9 +171,12 @@ pub const Scene = struct {
                 b = 1.0 - 2.0 * (node.rotation[1] * node.rotation[1] + node.rotation[2] * node.rotation[2]);
                 var roll = std.math.atan2(f32, a, b);
 
-                main_camera.pitch = pitch;
+                main_camera.pitch = pitch - (90.0 * std.math.pi / 180.0);
                 main_camera.yaw = yaw;
                 main_camera.roll = roll;
+
+                const transform = Mat4.initRotationX(main_camera.pitch).mul(Mat4.initRotationY(main_camera.yaw));
+                main_camera.forward = Vec3.init(0.0, 0.0, 1.0).transform(transform).normalize();
 
                 break;
             }
@@ -614,6 +635,34 @@ pub const Renderer = struct {
         r.* = undefined;
     }
 
+    pub fn update(r: *Renderer) void {
+        r.frame_stats.update();
+
+        // Handle camera movement with 'WASD' keys.
+        {
+            const speed: f32 = 5.0;
+            const delta_time = r.frame_stats.delta_time;
+            const transform = Mat4.initRotationX(r.current_scene.main_camera.pitch).mul(Mat4.initRotationY(r.current_scene.main_camera.yaw));
+            var forward = Vec3.init(0.0, 0.0, 1.0).transform(transform).normalize();
+
+            r.current_scene.main_camera.forward = forward;
+            var right = Vec3.init(0.0, 1.0, 0.0).cross(forward);
+            right = right.normalize();
+            right = right.scale(speed * delta_time);
+
+            if (w.GetAsyncKeyState('W') < 0) {
+                r.current_scene.main_camera.position = r.current_scene.main_camera.position.add(forward);
+            } else if (w.GetAsyncKeyState('S') < 0) {
+                r.current_scene.main_camera.position = r.current_scene.main_camera.position.sub(forward);
+            }
+            if (w.GetAsyncKeyState('D') < 0) {
+                r.current_scene.main_camera.position = r.current_scene.main_camera.position.add(right);
+            } else if (w.GetAsyncKeyState('A') < 0) {
+                r.current_scene.main_camera.position = r.current_scene.main_camera.position.sub(right);
+            }
+        }
+    }
+
     pub fn render(r: *Renderer) void {
         var grfx = &r.grfx;
         grfx.beginFrame();
@@ -637,7 +686,89 @@ pub const Renderer = struct {
         grfx.cmdlist.ClearDepthStencilView(r.depth_texture.view, d3d12.CLEAR_FLAG_DEPTH, 1.0, 0, 0, null);
 
         // Draw Current Scene
+        const scene = &r.current_scene;
 
+        const cam_world_to_view = vm.Mat4.initLookToLh(
+            scene.main_camera.position,
+            scene.main_camera.forward,
+            vm.Vec3.init(0.0, 1.0, 0.0),
+        );
+        var cam_view_to_clip: Mat4 = undefined;
+
+        if (scene.main_camera.type == .Perspective) {
+            cam_view_to_clip = Mat4.initPerspectiveFovLh(
+                scene.main_camera.u.perspective.yfov,
+                scene.main_camera.u.perspective.aspect_ratio,
+                scene.main_camera.u.perspective.znear,
+                scene.main_camera.u.perspective.zfar,
+            );
+        } else {
+            assert(false);
+        }
+
+        const cam_world_to_clip = cam_world_to_view.mul(cam_view_to_clip);
+
+        grfx.cmdlist.IASetPrimitiveTopology(.TRIANGLELIST);
+        grfx.cmdlist.IASetVertexBuffers(0, 1, &[_]d3d12.VERTEX_BUFFER_VIEW{.{
+            .BufferLocation = grfx.getResource(r.vertex_buffer).GetGPUVirtualAddress(),
+            .SizeInBytes = @intCast(u32, grfx.getResourceSize(r.vertex_buffer)),
+            .StrideInBytes = @sizeOf(Vertex),
+        }});
+        grfx.cmdlist.IASetIndexBuffer(&.{
+            .BufferLocation = grfx.getResource(r.index_buffer).GetGPUVirtualAddress(),
+            .SizeInBytes = @intCast(u32, grfx.getResourceSize(r.index_buffer)),
+            .Format = .R32_UINT,
+        });
+
+        grfx.setCurrentPipeline(r.mesh_pbr_pso);
+
+        // Set scene constants
+        {
+            const mem = grfx.allocateUploadMemory(SceneConst, 1);
+            mem.cpu_slice[0] = .{
+                .world_to_clip = cam_world_to_clip.transpose(),
+                .camera_position = scene.main_camera.position,
+            };
+
+            grfx.cmdlist.SetGraphicsRootConstantBufferView(0, mem.gpu_base);
+        }
+
+        // Set SRV indices constants
+        {
+            const mem = grfx.allocateUploadMemory(SRVIndexConst, 1);
+            mem.cpu_slice[0] = .{
+                .material_buffer_index = r.material_buffer.persistent_descriptor.index,
+            };
+
+            grfx.cmdlist.SetGraphicsRootConstantBufferView(3, mem.gpu_base);
+        }
+
+        var mesh_index: u32 = 0;
+        while (mesh_index < scene.meshes.items.len) : (mesh_index += 1) {
+            // TODO: Store entities transforms in the scene
+            const object_to_world = Mat4.initIdentity();
+            const draw_const_mem = grfx.allocateUploadMemory(DrawConst, 1);
+            draw_const_mem.cpu_slice[0] = .{
+                .object_to_world = object_to_world.transpose(),
+            };
+
+            grfx.cmdlist.SetGraphicsRootConstantBufferView(1, draw_const_mem.gpu_base);
+
+            const material_index_mem = grfx.allocateUploadMemory(MaterialIndexConst, 1);
+            material_index_mem.cpu_slice[0] = .{
+                .material_index = scene.meshes.items[mesh_index].material_index,
+            };
+
+            grfx.cmdlist.SetGraphicsRootConstantBufferView(2, material_index_mem.gpu_base);
+
+            grfx.cmdlist.DrawIndexedInstanced(
+                scene.meshes.items[mesh_index].num_indices,
+                1,
+                scene.meshes.items[mesh_index].index_offset,
+                @intCast(i32, scene.meshes.items[mesh_index].vertex_offset),
+                0,
+            );
+        }
 
         // r.gui.draw(grfx);
 

@@ -42,6 +42,7 @@ pub fn main() anyerror!void {
                 break;
             }
         } else {
+            renderer.update();
             renderer.render();
         }
     }

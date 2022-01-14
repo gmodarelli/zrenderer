@@ -55,12 +55,6 @@ float geometrySmith(float n_dot_l, float n_dot_v, float roughness) {
 
 // "DescriptorTable(SRV(t0, numDescriptors = 3), visibility = SHADER_VISIBILITY_PIXEL), " \
 
-struct SceneConst {
-    float4x4 world_to_clip;
-    float3 camera_position;
-    int draw_mode;
-};
-
 struct Material {
     float3 base_color;
     float roughness;
@@ -68,6 +62,11 @@ struct Material {
     uint base_color_tex_index;
     uint metallic_roughness_tex_index;
     uint normal_tex_index;
+};
+
+struct SceneConst {
+    float4x4 world_to_clip;
+    float3 camera_position;
 };
 
 struct DrawConst {
@@ -134,24 +133,6 @@ void psMeshPbr(
     Texture2D srv_metallic_roughness_texture = ResourceDescriptorHeap[material.metallic_roughness_tex_index];
     Texture2D srv_normal_texture = ResourceDescriptorHeap[material.normal_tex_index];
 
-    if (scene_const.draw_mode == 1) {
-        // out_color = pow(srv_ao_texture.Sample(sam_aniso, texcoords0), 1.0 / GAMMA);
-        out_color = float4(1, 1, 1, 1);
-        return;
-    } else if (scene_const.draw_mode == 2) {
-        out_color = srv_base_color_texture.Sample(sam_aniso, texcoords0);
-        return;
-    } else if (scene_const.draw_mode == 3) {
-        out_color = pow(srv_metallic_roughness_texture.Sample(sam_aniso, texcoords0).b, 1.0 / GAMMA);
-        return;
-    } else if (scene_const.draw_mode == 4) {
-        out_color = pow(srv_metallic_roughness_texture.Sample(sam_aniso, texcoords0).g, 1.0 / GAMMA);
-        return;
-    } else if (scene_const.draw_mode == 5) {
-        out_color = pow(srv_normal_texture.Sample(sam_aniso, texcoords0), 1.0 / GAMMA);
-        return;
-    }
-
     float3 n = normalize(srv_normal_texture.Sample(sam_aniso, texcoords0).rgb * 2.0 - 1.0);
 
     normal = normalize(normal);
@@ -167,7 +148,7 @@ void psMeshPbr(
     float roughness;
     {
         const float2 mr = srv_metallic_roughness_texture.Sample(sam_aniso, texcoords0).bg;
-        metallic = mr.r;
+        metallic = 0; //mr.r; // TODO: We seem to be exporting the material as fully metallic
         roughness = mr.g;
     }
     const float3 base_color = pow(srv_base_color_texture.Sample(sam_aniso, texcoords0).rgb, GAMMA);
