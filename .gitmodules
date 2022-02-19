@@ -1,3 +1,6 @@
 [submodule "code/external/zig-gamedev"]
 	path = code/external/zig-gamedev
 	url = git@github.com:gmodarelli/zig-gamedev.git
+[submodule "3rd_party/zig-gamedev"]
+	path = 3rd_party/zig-gamedev
+	url = git@github.com:gmodarelli/zig-gamedev.git

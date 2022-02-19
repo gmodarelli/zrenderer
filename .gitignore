@@ -2,3 +2,8 @@ zig-out
 zig-cache
 code/content/shaders/*
 !code/content/shaders/.gitkeep
+
+zrenderer/zig-out
+zrenderer/zig-cache
+zrenderer/content/shaders/*
+!zrenderer/content/shaders/.gitkeep
