@@ -71,13 +71,135 @@ pub fn build(b: *std.build.Builder) void {
 
     install_content_step.step.dependOn(dxc_step);
 
-    const exe = b.addExecutable("zrenderer", "src/main.zig");
+    _ = buildMeshConverter(b, exe_options, tracy);
+
+    // const Program = struct {
+    //     exe: *std.build.LibExeObjStep,
+    //     deps: struct {
+    //         cgltf: bool = false,
+    //     },
+    // };
+
+    // const progs = [_]Program{
+    //     .{ .exe = b.addExecutable("zrenderer", "src/main.zig"), .deps = .{} },
+    //     .{ .exe = b.addExecutable("mesh_converter", "src/tools/mesh_converter.zig"), .deps = .{ .cgltf = true } },
+    // };
+    // const active_prog = progs[0];
+    // const target_options = b.standardTargetOptions(.{});
+    // const release_options = b.standardReleaseOptions();
+
+    // for (progs) |prog| {
+    //     prog.exe.setBuildMode(release_options);
+    //     prog.exe.setTarget(target_options);
+    //     prog.exe.addOptions("build_options", exe_options);
+
+    //     if (tracy) |tracy_path| {
+    //         const client_cpp = std.fs.path.join(
+    //             b.allocator,
+    //             &[_][]const u8{ tracy_path, "TracyClient.cpp" },
+    //         ) catch unreachable;
+    //         prog.exe.addIncludeDir(tracy_path);
+    //         prog.exe.addCSourceFile(client_cpp, &[_][]const u8{
+    //             "-DTRACY_ENABLE=1",
+    //             "-fno-sanitize=undefined",
+    //             "-D_WIN32_WINNT=0x601",
+    //         });
+    //         prog.exe.linkSystemLibrary("ws2_32");
+    //         prog.exe.linkSystemLibrary("dbghelp");
+    //     }
+
+    //     // This is needed to export symbols from an .exe file.
+    //     // We export D3D12SDKVersion and D3D12SDKPath symbols which
+    //     // is required by DirectX 12 Agility SDK.
+    //     prog.exe.rdynamic = true;
+    //     prog.exe.want_lto = false;
+
+    //     const zwin32_pkg = Pkg{
+    //         .name = "zwin32",
+    //         .path = .{ .path = "../3rd_party/zig-gamedev/libs/zwin32/zwin32.zig" },
+    //     };
+    //     prog.exe.addPackage(zwin32_pkg);
+
+    //     const options_pkg = Pkg{
+    //         .name = "build_options",
+    //         .path = exe_options.getSource(),
+    //     };
+
+    //     const ztracy_pkg = Pkg{
+    //         .name = "ztracy",
+    //         .path = .{ .path = "../3rd_party/zig-gamedev/libs/ztracy/ztracy.zig" },
+    //         .dependencies = &[_]Pkg{options_pkg},
+    //     };
+    //     prog.exe.addPackage(ztracy_pkg);
+
+    //     const zd3d12_pkg = Pkg{
+    //         .name = "zd3d12",
+    //         .path = .{ .path = "../3rd_party/zig-gamedev/libs/zd3d12/zd3d12.zig" },
+    //         .dependencies = &[_]Pkg{
+    //             zwin32_pkg,
+    //             ztracy_pkg,
+    //             options_pkg,
+    //         },
+    //     };
+    //     prog.exe.addPackage(zd3d12_pkg);
+
+    //     const zmath_pkg = Pkg{
+    //         .name = "zmath",
+    //         .path = .{ .path = "../3rd_party/zig-gamedev/libs/zmath/zmath.zig" },
+    //     };
+    //     prog.exe.addPackage(zmath_pkg);
+
+    //     const common_pkg = Pkg{
+    //         .name = "common",
+    //         .path = .{ .path = "../3rd_party/zig-gamedev/libs/common/common.zig" },
+    //         .dependencies = &[_]Pkg{
+    //             zwin32_pkg,
+    //             zd3d12_pkg,
+    //             ztracy_pkg,
+    //             options_pkg,
+    //         },
+    //     };
+    //     prog.exe.addPackage(common_pkg);
+
+    //     const external = "../3rd_party/zig-gamedev/external/src";
+    //     prog.exe.addIncludeDir(external);
+
+    //     prog.exe.linkSystemLibrary("c");
+    //     prog.exe.linkSystemLibrary("c++");
+    //     prog.exe.linkSystemLibrary("imm32");
+
+    //     prog.exe.addCSourceFile(external ++ "/imgui/imgui.cpp", &.{""});
+    //     prog.exe.addCSourceFile(external ++ "/imgui/imgui_widgets.cpp", &.{""});
+    //     prog.exe.addCSourceFile(external ++ "/imgui/imgui_tables.cpp", &.{""});
+    //     prog.exe.addCSourceFile(external ++ "/imgui/imgui_draw.cpp", &.{""});
+    //     prog.exe.addCSourceFile(external ++ "/imgui/imgui_demo.cpp", &.{""});
+    //     prog.exe.addCSourceFile(external ++ "/cimgui.cpp", &.{""});
+
+    //     if (prog.deps.cgltf) {
+    //         prog.exe.addCSourceFile(external ++ "/cgltf.c", &.{""});
+    //     }
+
+    //     prog.exe.install();
+    // }
+
+    // const run_cmd = meshConverterExe.run();
+    // run_cmd.step.dependOn(b.getInstallStep());
+    // if (b.args) |args| {
+    //     run_cmd.addArgs(args);
+    // }
+
+    // const run_step = b.step("run", "Run the app");
+    // run_step.dependOn(&run_cmd.step);
+}
+
+pub fn buildMeshConverter(b: *Builder, build_options: *std.build.OptionsStep, tracy: ?[]const u8) *std.build.LibExeObjStep {
     const target_options = b.standardTargetOptions(.{});
     const release_options = b.standardReleaseOptions();
 
+    var exe = b.addExecutable("mesh_converter", "src/tools/mesh_converter.zig");
     exe.setBuildMode(release_options);
     exe.setTarget(target_options);
-    exe.addOptions("build_options", exe_options);
+    exe.addOptions("build_options", build_options);
 
     if (tracy) |tracy_path| {
         const client_cpp = std.fs.path.join(
@@ -94,58 +216,11 @@ pub fn build(b: *std.build.Builder) void {
         exe.linkSystemLibrary("dbghelp");
     }
 
-    // This is needed to export symbols from an .exe file.
-    // We export D3D12SDKVersion and D3D12SDKPath symbols which
-    // is required by DirectX 12 Agility SDK.
-    exe.rdynamic = true;
-    exe.want_lto = false;
-
-    const zwin32_pkg = Pkg{
-        .name = "zwin32",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/zwin32/zwin32.zig" },
+    const mesh_pkg = Pkg{
+        .name = "mesh",
+        .path = .{ .path = "src/libs/mesh.zig" },
     };
-    exe.addPackage(zwin32_pkg);
-
-    const options_pkg = Pkg{
-        .name = "build_options",
-        .path = exe_options.getSource(),
-    };
-
-    const ztracy_pkg = Pkg{
-        .name = "ztracy",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/ztracy/ztracy.zig" },
-        .dependencies = &[_]Pkg{options_pkg},
-    };
-    exe.addPackage(ztracy_pkg);
-
-    const zd3d12_pkg = Pkg{
-        .name = "zd3d12",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/zd3d12/zd3d12.zig" },
-        .dependencies = &[_]Pkg{
-            zwin32_pkg,
-            ztracy_pkg,
-            options_pkg,
-        },
-    };
-    exe.addPackage(zd3d12_pkg);
-
-    const zmath_pkg = Pkg{
-        .name = "zmath",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/zmath/zmath.zig" },
-    };
-    exe.addPackage(zmath_pkg);
-
-    const common_pkg = Pkg{
-        .name = "common",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/common/common.zig" },
-        .dependencies = &[_]Pkg{
-            zwin32_pkg,
-            zd3d12_pkg,
-            ztracy_pkg,
-            options_pkg,
-        },
-    };
-    exe.addPackage(common_pkg);
+    exe.addPackage(mesh_pkg);
 
     const external = "../3rd_party/zig-gamedev/external/src";
     exe.addIncludeDir(external);
@@ -154,21 +229,9 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkSystemLibrary("c++");
     exe.linkSystemLibrary("imm32");
 
-    exe.addCSourceFile(external ++ "/imgui/imgui.cpp", &.{""});
-    exe.addCSourceFile(external ++ "/imgui/imgui_widgets.cpp", &.{""});
-    exe.addCSourceFile(external ++ "/imgui/imgui_tables.cpp", &.{""});
-    exe.addCSourceFile(external ++ "/imgui/imgui_draw.cpp", &.{""});
-    exe.addCSourceFile(external ++ "/imgui/imgui_demo.cpp", &.{""});
-    exe.addCSourceFile(external ++ "/cimgui.cpp", &.{""});
+    exe.addCSourceFile(external ++ "/cgltf.c", &.{""});
 
     exe.install();
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    return exe;
 }
