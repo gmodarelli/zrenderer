@@ -10,16 +10,7 @@ pub const c = @cImport({
 
 const assert = std.debug.assert;
 
-// Vertex Stream Data: 15 floats
-const VertexData = struct {
-    position: [3]f32,
-    uv: [2]f32,
-    color: [4]f32,
-    normal: [3]f32,
-    tangent: [4]f32,
-};
-
-pub const STREAM_ELEMENT_SIZE: u32 = @sizeOf(VertexData);
+pub const STREAM_ELEMENT_SIZE: u32 = @sizeOf(m.VertexData);
 
 fn writeInterleavedVertexAttribute(
     accessor: *c.cgltf_accessor,
@@ -91,25 +82,25 @@ fn extractVertexData(primitive: c.cgltf_primitive, num_vertices: u32, vertex_off
         if (attrib.*.type == c.cgltf_attribute_type_position) {
             assert(accessor.*.type == c.cgltf_type_vec3);
             assert(accessor.*.component_type == c.cgltf_component_type_r_32f);
-            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(VertexData, "position") / 4, mesh_data);
+            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(m.VertexData, "position") / 4, mesh_data);
         } else if (attrib.*.type == c.cgltf_attribute_type_normal) {
             assert(accessor.*.type == c.cgltf_type_vec3);
             assert(accessor.*.component_type == c.cgltf_component_type_r_32f);
-            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(VertexData, "normal") / 4, mesh_data);
+            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(m.VertexData, "normal") / 4, mesh_data);
         } else if (attrib.*.type == c.cgltf_attribute_type_texcoord) {
             assert(accessor.*.type == c.cgltf_type_vec2);
             assert(accessor.*.component_type == c.cgltf_component_type_r_32f);
-            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(VertexData, "uv") / 4, mesh_data);
+            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(m.VertexData, "uv") / 4, mesh_data);
         } else if (attrib.*.type == c.cgltf_attribute_type_tangent) {
             assert(accessor.*.type == c.cgltf_type_vec4);
             assert(accessor.*.component_type == c.cgltf_component_type_r_32f);
-            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(VertexData, "tangent") / 4, mesh_data);
+            writeInterleavedVertexAttribute(accessor, num_vertices, vertex_offset, data_addr, @offsetOf(m.VertexData, "tangent") / 4, mesh_data);
         } else if (attrib.*.type == c.cgltf_attribute_type_color) {
             assert(accessor.*.type == c.cgltf_type_vec4);
             assert(accessor.*.component_type == c.cgltf_component_type_r_16u);
             var vertex_index: u32 = 0;
             while (vertex_index < num_vertices) : (vertex_index += 1) {
-                const dest_index = vertex_offset + (vertex_index * STREAM_ELEMENT_SIZE / 4) + (@offsetOf(VertexData, "color") / 4);
+                const dest_index = vertex_offset + (vertex_index * STREAM_ELEMENT_SIZE / 4) + (@offsetOf(m.VertexData, "color") / 4);
                 var color: [4]u16 = undefined;
                 @memcpy(@ptrCast([*]u8, &color), data_addr + (vertex_index * accessor.*.stride), accessor.*.stride);
                 mesh_data.vertex_data.items[dest_index + 0] = @intToFloat(f32, color[0]) / 65535.0;
@@ -136,8 +127,8 @@ fn convertGLTF(gltf_path: []const u8, mesh_data: *m.MeshData) !void {
     }
     defer c.cgltf_free(data);
 
-    var index_offset: u32 = 0;
-    var vertex_offset: u32 = 0;
+    var index_offset: u32 = @intCast(u32, mesh_data.index_data.items.len);
+    var vertex_offset: u32 = @intCast(u32, mesh_data.vertex_data.items.len);
 
     var mesh_index: u32 = 0;
     while (mesh_index < data.meshes_count) : (mesh_index += 1) {
@@ -179,7 +170,6 @@ fn convertGLTF(gltf_path: []const u8, mesh_data: *m.MeshData) !void {
 
 const ParsedArguments = struct {
     input_path: []u8,
-    output_path: []u8,
 };
 
 fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
@@ -195,22 +185,12 @@ fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
     while (args_iterator.next()) |arg| {
         if (std.mem.eql(u8, arg[0 .. arg.len], "-i")) {
             if (args_iterator.next()) |input_path| {
-                result.input_path = try std.fmt.allocPrint(mem_allocator, "{s} ", .{input_path[0 .. input_path.len]});
-                result.input_path[result.input_path.len - 1] = 0;
+                result.input_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{input_path[0 .. input_path.len]});
             } else {
                 printUsage();
-                std.debug.panic("Failed to find input path", .{});
-            }
-        } else if (std.mem.eql(u8, arg[0 .. arg.len], "-o")) {
-            if (args_iterator.next()) |output_path| {
-                result.output_path = try std.fmt.allocPrint(mem_allocator, "{s} ", .{output_path[0 .. output_path.len]});
-                result.output_path[result.output_path.len - 1] = 0;
-            } else {
-                printUsage();
-                std.debug.panic("Failed to find output path", .{});
+                std.debug.panic("Failed to find input folder", .{});
             }
         } else {
-            std.log.debug("Failed to match -i or -o", .{});
             printUsage();
             std.debug.panic("Bad arguments", .{});
         }
@@ -221,7 +201,7 @@ fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
 
 fn printUsage() void {
     std.log.info("Usage:", .{});
-    std.log.info("\tmesh_converter.exe -i path/to/mesh.gltf -o path/to/mesh.bin\n", .{});
+    std.log.info("\tmesh_converter.exe -i path/to/gltf/files/\n", .{});
 }
 
 pub fn main() !void {
@@ -235,10 +215,8 @@ pub fn main() !void {
 
     const parsed_arguments = try parseArgs(gpa_allocator);
     defer gpa_allocator.free(parsed_arguments.input_path);
-    defer gpa_allocator.free(parsed_arguments.output_path);
 
-    std.log.info("Input file: '{s}'", .{parsed_arguments.input_path});
-    std.log.info("Output file: '{s}'", .{parsed_arguments.output_path});
+    std.log.info("Input folder: '{s}'", .{parsed_arguments.input_path});
 
     var mesh_data: m.MeshData = .{
         .index_data = std.ArrayList(u32).init(gpa_allocator),
@@ -249,7 +227,23 @@ pub fn main() !void {
     defer mesh_data.vertex_data.deinit();
     defer mesh_data.meshes.deinit();
 
-    try convertGLTF(parsed_arguments.input_path, &mesh_data);
+    var dir = try std.fs.cwd().openDir(parsed_arguments.input_path, .{ .iterate = true });
+    defer dir.close();
+    var dir_it = dir.iterate();
 
-    std.log.info("Converted {d} meshes.", .{mesh_data.meshes.items.len});
+    while (try dir_it.next()) |file| {
+        if (file.kind == .File) {
+            if (std.mem.eql(u8, "gltf", file.name[file.name.len - 4 .. file.name.len])) {
+                var file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/{s}", .{ parsed_arguments.input_path, file.name});
+                defer gpa_allocator.free(file_path);
+
+                std.log.debug("Converting mesh {s}...", .{file_path});
+                try convertGLTF(file_path, &mesh_data);
+            }
+        }
+    }
+
+    var output_file = try std.fs.cwd().createFile("meshes.bin", .{ .read = true });
+    defer output_file.close();
+    try mesh_data.serialize(output_file);
 }

@@ -51,8 +51,55 @@ pub const MeshFileHeader = struct {
     vertex_data_size: u32,
 };
 
+pub const VertexData = struct {
+    position: [3]f32,
+    uv: [2]f32,
+    color: [4]f32,
+    normal: [3]f32,
+    tangent: [4]f32,
+};
+
 pub const MeshData = struct {
     index_data: std.ArrayList(u32),
     vertex_data: std.ArrayList(f32),
     meshes: std.ArrayList(Mesh),
+
+    pub fn serialize(mesh_data: *MeshData, output_file: std.fs.File) !void {
+        var mesh_file_header: MeshFileHeader = .{
+            .magic_value = 0x12345678,
+            .num_meshes = @intCast(u32, mesh_data.meshes.items.len),
+            .data_block_start_offset = @intCast(u32, @sizeOf(MeshFileHeader) + mesh_data.meshes.items.len * @sizeOf(Mesh)),
+            .index_data_size = @intCast(u32, @sizeOf(u32) * mesh_data.index_data.items.len),
+            .vertex_data_size = @intCast(u32, @sizeOf(VertexData) * mesh_data.vertex_data.items.len),
+        };
+
+        var slice = @ptrCast([*]u8, &mesh_file_header)[0 .. @sizeOf(MeshFileHeader)];
+        try output_file.writeAll(std.mem.sliceAsBytes(slice));
+
+        try output_file.writeAll(std.mem.sliceAsBytes(mesh_data.meshes.items[0..]));
+        try output_file.writeAll(std.mem.sliceAsBytes(mesh_data.vertex_data.items[0..]));
+        try output_file.writeAll(std.mem.sliceAsBytes(mesh_data.index_data.items[0..]));
+    }
+
+    pub fn load(input_file: std.fs.File, allocator: std.mem.Allocator) !MeshData {
+        var header: MeshFileHeader = undefined;
+
+        var slice = @ptrCast([*]u8, &header)[0 .. @sizeOf(MeshFileHeader)];
+        _ = try input_file.readAll(std.mem.asBytes(slice));
+
+        var mesh_data: MeshData = .{
+            .index_data = std.ArrayList(u32).init(allocator),
+            .vertex_data = std.ArrayList(f32).init(allocator),
+            .meshes = std.ArrayList(Mesh).init(allocator),
+        };
+        try mesh_data.meshes.resize(header.num_meshes);
+        try mesh_data.vertex_data.resize(header.vertex_data_size / 4);
+        try mesh_data.index_data.resize(header.index_data_size / 4);
+
+        _ = try input_file.readAll(std.mem.sliceAsBytes(mesh_data.meshes.items[0..]));
+        _ = try input_file.readAll(std.mem.sliceAsBytes(mesh_data.vertex_data.items[0..]));
+        _ = try input_file.readAll(std.mem.sliceAsBytes(mesh_data.index_data.items[0..]));
+
+        return mesh_data;
+    }
 };
