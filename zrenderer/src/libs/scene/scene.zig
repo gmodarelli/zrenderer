@@ -57,6 +57,8 @@ pub const Scene = struct {
         var slice = @ptrCast([*]u8, &header)[0 .. @sizeOf(SceneFileHeader)];
         _ = try input_file.readAll(std.mem.asBytes(slice));
 
+        std.debug.assert(header.magic_value == 0x87654321);
+
         var scene: Scene = .{
             .nodes = std.ArrayList(Node).init(allocator),
             .transforms = std.ArrayList(zm.Mat).init(allocator),

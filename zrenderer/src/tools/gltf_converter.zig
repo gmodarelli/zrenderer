@@ -323,6 +323,7 @@ const InputType = enum {
 const ParsedArguments = struct {
     input_type: InputType,
     input_path: []u8,
+    output_path: []u8,
 };
 
 fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
@@ -352,6 +353,13 @@ fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
                 printUsage();
                 std.debug.panic("Failed to find scene file", .{});
             }
+        } else if (std.mem.eql(u8, arg[0 .. arg.len], "-o")) {
+            if (args_iterator.next()) |output_path| {
+                result.output_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{output_path[0 .. output_path.len]});
+            } else {
+                printUsage();
+                std.debug.panic("Failed to output path", .{});
+            }
         } else {
             printUsage();
             std.debug.panic("Bad arguments", .{});
@@ -363,8 +371,8 @@ fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
 
 fn printUsage() void {
     std.log.info("Usage:", .{});
-    std.log.info("\tgltf_converter.exe -i path/to/gltf_files/\n", .{});
-    std.log.info("\tgltf_converter.exe -s path/to/scene.gltf\n", .{});
+    std.log.info("\tgltf_converter.exe -i path/to/gltf_files/ -o path/to/output/folder/\n", .{});
+    std.log.info("\tgltf_converter.exe -s path/to/scene.gltf -o path/to/output/folder/\n", .{});
 }
 
 pub fn main() !void {
@@ -382,9 +390,11 @@ pub fn main() !void {
 
     const parsed_arguments = try parseArgs(gpa_allocator);
     defer gpa_allocator.free(parsed_arguments.input_path);
+    defer gpa_allocator.free(parsed_arguments.output_path);
 
     std.log.info("Input type: '{s}'", .{parsed_arguments.input_type});
     std.log.info("Input path: '{s}'", .{parsed_arguments.input_path});
+    std.log.info("Output path: '{s}'", .{parsed_arguments.output_path});
 
     if (parsed_arguments.input_type == .MeshFolder) {
         var mesh_data: m.MeshData = .{
@@ -412,7 +422,9 @@ pub fn main() !void {
             }
         }
 
-        var output_file = try std.fs.cwd().createFile("meshes.bin", .{ .read = true });
+        var output_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/meshes.bin", .{ parsed_arguments.output_path});
+        defer gpa_allocator.free(output_file_path);
+        var output_file = try std.fs.cwd().createFile(output_file_path, .{ .read = true });
         defer output_file.close();
         try mesh_data.serialize(output_file);
     } else {
@@ -436,11 +448,15 @@ pub fn main() !void {
 
         try convertGLTFScene(parsed_arguments.input_path, arena_allocator, &scene, &mesh_data);
 
-        var meshes_file = try std.fs.cwd().createFile("meshes.bin", .{ .read = true });
+        var output_meshes_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/meshes.bin", .{ parsed_arguments.output_path});
+        defer gpa_allocator.free(output_meshes_file_path);
+        var meshes_file = try std.fs.cwd().createFile(output_meshes_file_path, .{ .read = true });
         defer meshes_file.close();
         try mesh_data.serialize(meshes_file);
 
-        var scene_file = try std.fs.cwd().createFile("scene.bin", .{ .read = true });
+        var output_scene_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/scene.bin", .{ parsed_arguments.output_path});
+        defer gpa_allocator.free(output_scene_file_path);
+        var scene_file = try std.fs.cwd().createFile(output_scene_file_path, .{ .read = true });
         defer scene_file.close();
         try scene.serialize(scene_file);
     }

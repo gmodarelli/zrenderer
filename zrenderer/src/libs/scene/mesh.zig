@@ -87,6 +87,8 @@ pub const MeshData = struct {
         var slice = @ptrCast([*]u8, &header)[0 .. @sizeOf(MeshFileHeader)];
         _ = try input_file.readAll(std.mem.asBytes(slice));
 
+        std.debug.assert(header.magic_value == 0x12345678);
+
         var mesh_data: MeshData = .{
             .index_data = std.ArrayList(u32).init(allocator),
             .vertex_data = std.ArrayList(f32).init(allocator),
