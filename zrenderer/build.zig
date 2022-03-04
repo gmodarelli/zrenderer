@@ -71,7 +71,7 @@ pub fn build(b: *std.build.Builder) void {
 
     install_content_step.step.dependOn(dxc_step);
 
-    _ = buildMeshConverter(b, exe_options, tracy);
+    _ = buildGLTFConverter(b, exe_options, tracy);
 
     // const Program = struct {
     //     exe: *std.build.LibExeObjStep,
@@ -192,11 +192,11 @@ pub fn build(b: *std.build.Builder) void {
     // run_step.dependOn(&run_cmd.step);
 }
 
-pub fn buildMeshConverter(b: *Builder, build_options: *std.build.OptionsStep, tracy: ?[]const u8) *std.build.LibExeObjStep {
+pub fn buildGLTFConverter(b: *Builder, build_options: *std.build.OptionsStep, tracy: ?[]const u8) *std.build.LibExeObjStep {
     const target_options = b.standardTargetOptions(.{});
     const release_options = b.standardReleaseOptions();
 
-    var exe = b.addExecutable("mesh_converter", "src/tools/mesh_converter.zig");
+    var exe = b.addExecutable("gltf_converter", "src/tools/gltf_converter.zig");
     exe.setBuildMode(release_options);
     exe.setTarget(target_options);
     exe.addOptions("build_options", build_options);
@@ -216,11 +216,20 @@ pub fn buildMeshConverter(b: *Builder, build_options: *std.build.OptionsStep, tr
         exe.linkSystemLibrary("dbghelp");
     }
 
-    const mesh_pkg = Pkg{
-        .name = "mesh",
-        .path = .{ .path = "src/libs/mesh.zig" },
+    const zmath_pkg = Pkg{
+        .name = "zmath",
+        .path = .{ .path = "../3rd_party/zig-gamedev/libs/zmath/zmath.zig" },
     };
-    exe.addPackage(mesh_pkg);
+    exe.addPackage(zmath_pkg);
+
+    const scene_pkg = Pkg{
+        .name = "scene",
+        .path = .{ .path = "src/libs/scene/scene.zig" },
+        .dependencies = &[_]Pkg{
+            zmath_pkg,
+        },
+    };
+    exe.addPackage(scene_pkg);
 
     const external = "../3rd_party/zig-gamedev/external/src";
     exe.addIncludeDir(external);
