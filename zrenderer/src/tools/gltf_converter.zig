@@ -435,5 +435,13 @@ pub fn main() !void {
         defer scene.transforms.deinit();
 
         try convertGLTFScene(parsed_arguments.input_path, arena_allocator, &scene, &mesh_data);
+
+        var meshes_file = try std.fs.cwd().createFile("meshes.bin", .{ .read = true });
+        defer meshes_file.close();
+        try mesh_data.serialize(meshes_file);
+
+        var scene_file = try std.fs.cwd().createFile("scene.bin", .{ .read = true });
+        defer scene_file.close();
+        try scene.serialize(scene_file);
     }
 }
