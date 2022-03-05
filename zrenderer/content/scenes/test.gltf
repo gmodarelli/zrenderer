@@ -15,10 +15,16 @@
     ],
     "nodes" : [
         {
+            "extras" : {
+                "static" : 1.0
+            },
             "mesh" : 0,
             "name" : "Cube"
         },
         {
+            "extras" : {
+                "static" : 1.0
+            },
             "mesh" : 0,
             "name" : "Cube.002",
             "translation" : [

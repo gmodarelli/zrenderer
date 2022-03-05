@@ -234,6 +234,7 @@ fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.S
         var gltf_node = gltf_scene.nodes[node_index];
 
         var node: s.Node = undefined;
+        node.static_type = .Static;
         var node_name_slice = std.mem.span(gltf_node.*.name);
 
         // Copy node name for debugging purposes
@@ -246,21 +247,39 @@ fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.S
             continue;
         }
 
+        const NodeExtras = struct {
+            static: f32,
+        };
+
+        var extra_size: c.cgltf_size = 0;
+        var extra_result = c.cgltf_copy_extras_json(data, &gltf_node.*.extras, null, &extra_size);
+        if (extra_result == c.cgltf_result_success) {
+            var json_string = try arena.alloc(u8, extra_size);
+            extra_result = c.cgltf_copy_extras_json(data, &gltf_node.*.extras, @ptrCast([*c]u8, json_string), &extra_size);
+            assert(extra_result == c.cgltf_result_success);
+
+            var token_stream = std.json.TokenStream.init(std.mem.sliceAsBytes(std.mem.span(json_string)));
+            const extras = try std.json.parse(NodeExtras, &token_stream, .{ .allow_trailing_data = true });
+
+            if (extras.static > 0.0) {
+                node.static_type = .Static;
+            } else {
+                node.static_type = .Moveable;
+            }
+        }
+
         var gltf_mesh = gltf_node.*.mesh;
-        std.log.debug("Trying to convert mesh {s}", .{gltf_mesh.*.name});
 
         var mesh_name_slice = try std.fmt.allocPrintZ(arena, "{s}", .{gltf_mesh.*.name});
         var mesh_name_bytes = std.mem.sliceAsBytes(mesh_name_slice);
 
         if (mesh_names_hashmap.get(mesh_name_bytes)) |processed_mesh| {
-            std.log.debug("Mesh {s}'s primitives already parsed. Num primitives: {d}", .{gltf_mesh.*.name, processed_mesh.num_meshes});
             node.num_meshes = processed_mesh.num_meshes;
             var i: u32 = 0;
             while (i < s.MAX_NUM_MESHES_PER_NODE) : (i += 1) {
                 node.mesh_indices[i] = processed_mesh.mesh_indices[i];
             }
         } else {
-            std.log.debug("Extracting primitives from mesh {s}", .{gltf_mesh.*.name});
             assert(@intCast(u32, gltf_mesh.*.primitives_count) <= s.MAX_NUM_MESHES_PER_NODE);
 
             var processed_mesh: ProcessedMesh = .{
@@ -419,7 +438,6 @@ pub fn main() !void {
                     var file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/{s}", .{ parsed_arguments.input_path, file.name});
                     defer gpa_allocator.free(file_path);
 
-                    std.log.debug("Converting mesh {s}...", .{file_path});
                     try convertGLTF(file_path, &mesh_data);
                 }
             }

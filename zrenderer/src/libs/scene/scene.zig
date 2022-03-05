@@ -5,6 +5,11 @@ pub const mesh = @import("mesh.zig");
 pub const MAX_NAME_LENGTH: u32 = 64;
 pub const MAX_NUM_MESHES_PER_NODE: u32 = 8;
 
+pub const NodeStaticType = enum {
+    Static,
+    Moveable,
+};
+
 pub const Node = struct {
     // Number of meshes that make up this node (max 'MAX_NUM_MESHES_PER_NODE' for now)
     num_meshes: u32,
@@ -13,6 +18,9 @@ pub const Node = struct {
 
     // Index of the transform of this node inside the Scene.nodes array
     transform_index: u32,
+
+    // Whether this node is static or moveable
+    static_type: NodeStaticType,
 
     // Name of this node, used for debug
     name: [MAX_NAME_LENGTH]u8,
