@@ -12,7 +12,7 @@ fn makeDxcCmd(
     const shader_ver = "6_6";
     const shader_dir = "content/shaders/";
     return [9][]const u8{
-        "../3rd_party/zig-gamedev/external/bin/dxc/dxc.exe",
+        "../3rd_party/zig-gamedev/libs/zwin32/bin/x64/dxc.exe",
         input_path,
         "/E " ++ entry_point,
         "/Fo " ++ shader_dir ++ output_filename,
@@ -44,10 +44,10 @@ pub fn build(b: *std.build.Builder) void {
     exe_options.addOption(bool, "enable_dx_gpu_debug", enable_dx_gpu_debug);
     exe_options.addOption(bool, "enable_tracy", tracy != null);
 
-    b.installFile("../3rd_party/zig-gamedev/external/bin/d3d12/D3D12Core.dll", "bin/d3d12/D3D12Core.dll");
-    b.installFile("../3rd_party/zig-gamedev/external/bin/d3d12/D3D12Core.pdb", "bin/d3d12/D3D12Core.pdb");
-    b.installFile("../3rd_party/zig-gamedev/external/bin/d3d12/D3D12SDKLayers.dll", "bin/d3d12/D3D12SDKLayers.dll");
-    b.installFile("../3rd_party/zig-gamedev/external/bin/d3d12/D3D12SDKLayers.pdb", "bin/d3d12/D3D12SDKLayers.pdb");
+    b.installFile("../3rd_party/zig-gamedev/libs/zwin32/bin/x64/D3D12Core.dll", "bin/d3d12/D3D12Core.dll");
+    b.installFile("../3rd_party/zig-gamedev/libs/zwin32/bin/x64/D3D12Core.pdb", "bin/d3d12/D3D12Core.pdb");
+    b.installFile("../3rd_party/zig-gamedev/libs/zwin32/bin/x64/D3D12SDKLayers.dll", "bin/d3d12/D3D12SDKLayers.dll");
+    b.installFile("../3rd_party/zig-gamedev/libs/zwin32/bin/x64/D3D12SDKLayers.pdb", "bin/d3d12/D3D12SDKLayers.pdb");
     const install_content_step = b.addInstallDirectory(
         .{ .source_dir = "content", .install_dir = .{ .custom = "" }, .install_subdir = "bin/content" },
     );
@@ -55,13 +55,13 @@ pub fn build(b: *std.build.Builder) void {
 
     const dxc_step = b.step("dxc", "Build shaders");
 
-    var dxc_command = makeDxcCmd("../3rd_party/zig-gamedev/libs/common/common.hlsl", "vsImGui", "imgui.vs.cso", "vs", "PSO__IMGUI");
+    var dxc_command = makeDxcCmd("../3rd_party/zig-gamedev/libs/common/src/hlsl/common.hlsl", "vsImGui", "imgui.vs.cso", "vs", "PSO__IMGUI");
     dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
-    dxc_command = makeDxcCmd("../3rd_party/zig-gamedev/libs/common/common.hlsl", "psImGui", "imgui.ps.cso", "ps", "PSO__IMGUI");
+    dxc_command = makeDxcCmd("../3rd_party/zig-gamedev/libs/common/src/hlsl/common.hlsl", "psImGui", "imgui.ps.cso", "ps", "PSO__IMGUI");
     dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
 
     dxc_command = makeDxcCmd(
-        "../3rd_party/zig-gamedev/libs/common/common.hlsl",
+        "../3rd_party/zig-gamedev/libs/common/src/hlsl/common.hlsl",
         "csGenerateMipmaps",
         "generate_mipmaps.cs.cso",
         "cs",
@@ -231,14 +231,14 @@ pub fn buildGLTFConverter(b: *Builder, build_options: *std.build.OptionsStep, tr
     };
     exe.addPackage(scene_pkg);
 
-    const external = "../3rd_party/zig-gamedev/external/src";
-    exe.addIncludeDir(external);
+    const c_libs_path = "../3rd_party/zig-gamedev/libs/common/src/c";
+    exe.addIncludeDir(c_libs_path);
 
     exe.linkSystemLibrary("c");
     exe.linkSystemLibrary("c++");
     exe.linkSystemLibrary("imm32");
 
-    exe.addCSourceFile(external ++ "/cgltf.c", &.{""});
+    exe.addCSourceFile(c_libs_path ++ "/cgltf.c", &.{""});
 
     exe.install();
 
