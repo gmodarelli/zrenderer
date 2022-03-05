@@ -234,6 +234,11 @@ fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.S
         var gltf_node = gltf_scene.nodes[node_index];
 
         var node: s.Node = undefined;
+        var node_name_slice = std.mem.span(gltf_node.*.name);
+
+        // Copy node name for debugging purposes
+        node.name = std.mem.zeroes([s.MAX_NAME_LENGTH]u8);
+        std.mem.copy(u8, &node.name, node_name_slice[0 .. @minimum(node_name_slice.len, s.MAX_NAME_LENGTH - 1)]);
 
         // Parse node's meshes
         if (gltf_node.*.mesh == null) {
@@ -311,8 +316,6 @@ fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.S
         // Add node to scene
         try scene.nodes.append(node);
     }
-
-    std.log.debug("{d} {d}", .{scene.nodes.items.len, mesh_data.meshes.items.len});
 }
 
 const InputType = enum {
