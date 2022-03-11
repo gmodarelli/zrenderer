@@ -88,9 +88,28 @@ pub export const D3D12SDKPath: [*:0]const u8 = ".\\d3d12\\";
 
 pub fn main() !void {
     ...
-    var gctx = zd3d12.GraphicsContext.init(window);
-    gctx.present_flags = 0;
-    gctx.present_interval = 1;
-    ...
+    var gctx = zd3d12.GraphicsContext.init(allocator, window);
+    defer gctx.deinit(allocator);
+
+    while (...) {
+        gctx.beginFrame();
+
+        const back_buffer = gctx.getBackBuffer();
+        gctx.addTransitionBarrier(back_buffer.resource_handle, d3d12.RESOURCE_STATE_RENDER_TARGET);
+        gctx.flushResourceBarriers();
+
+        gctx.cmdlist.OMSetRenderTargets(
+            1,
+            &[_]d3d12.CPU_DESCRIPTOR_HANDLE{back_buffer.descriptor_handle},
+            w32.TRUE,
+            null,
+        );
+        gctx.cmdlist.ClearRenderTargetView(back_buffer.descriptor_handle, &.{ 0.2, 0.4, 0.8, 1.0 }, 0, null);
+
+        gctx.addTransitionBarrier(back_buffer.resource_handle, d3d12.RESOURCE_STATE_PRESENT);
+        gctx.flushResourceBarriers();
+
+        gctx.endFrame();
+    }
 }
 ```

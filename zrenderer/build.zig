@@ -188,14 +188,14 @@ pub fn buildGLTFConverter(b: *Builder, options: Options) void {
 
     const ztracy_pkg = Pkg{
         .name = "ztracy",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/ztracy/src/ztracy.zig" },
+        .path = .{ .path = thisDir() ++ "/libs/ztracy/src/ztracy.zig" },
         .dependencies = &[_]Pkg{options_pkg},
     };
     exe.addPackage(ztracy_pkg);
 
     const zmath_pkg = Pkg{
         .name = "zmath",
-        .path = .{ .path = "../3rd_party/zig-gamedev/libs/zmath/zmath.zig" },
+        .path = .{ .path = thisDir() ++  "/libs/zmath/zmath.zig" },
     };
     exe.addPackage(zmath_pkg);
 
