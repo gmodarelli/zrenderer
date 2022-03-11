@@ -203,6 +203,25 @@ fn extractGLTFPrimitive(primitive: c.cgltf_primitive, mesh_data: *m.MeshData) !v
     try mesh_data.meshes.append(mesh);
 }
 
+const NodeExtras = struct {
+    static: f32,
+};
+
+fn quadToEulerAngles(quat: zm.Quat, x: *f32, y: *f32, z: *f32) void {
+    const t0 = 2.0 * (quat[3] * quat[0] + quat[1] * quat[2]);
+    const t1 = 1.0 - 2.0 * (quat[0] * quat[0] + quat[1] * quat[1]);
+    x.* = std.math.atan2(f32, t0, t1);
+    
+    var t2 = 2.0 * (quat[3] * quat[1] - quat[2] * quat[0]);
+    t2 = if (t2 > 1.0) 1.0 else t2;
+    t2 = if (t2 < -1.0) -1.0 else t2;
+    y.* = std.math.asin(t2);
+    
+    const t3 = 2.0 * (quat[3] * quat[2] + quat[0] * quat[1]);
+    const t4 = 1.0 - 2.0 * (quat[1] * quat[1] + quat[2] * quat[2]);
+    z.* = std.math.atan2(f32, t3, t4);
+}
+
 fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.Scene, mesh_data: *m.MeshData) !void {
     var data: *c.cgltf_data = undefined;
     const options = std.mem.zeroes(c.cgltf_options);
@@ -233,23 +252,86 @@ fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.S
     while (node_index < gltf_scene.nodes_count) : (node_index += 1) {
         var gltf_node = gltf_scene.nodes[node_index];
 
-        var node: s.Node = undefined;
-        node.static_type = .Static;
-        var node_name_slice = std.mem.span(gltf_node.*.name);
+        std.log.debug("Converting node #{d} of {d} '{s}'", .{ node_index + 1, gltf_scene.nodes_count, gltf_node.*.name });
 
-        // Copy node name for debugging purposes
-        node.name = std.mem.zeroes([s.MAX_NAME_LENGTH]u8);
-        std.mem.copy(u8, &node.name, node_name_slice[0 .. @minimum(node_name_slice.len, s.MAX_NAME_LENGTH - 1)]);
+        // Parse node's camera
+        if (gltf_node.*.children_count == 1 and gltf_node.*.children[0].*.camera != null) {
+            var child_node = gltf_node.*.children[0];
 
-        // Parse node's meshes
+            var camera: s.Camera = undefined;
+
+            // Extract camera transform
+            {
+                camera.position[0] = 0.0;
+                camera.position[1] = 0.0;
+                camera.position[2] = 0.0;
+
+                if (gltf_node.*.has_translation > 0) {
+                    camera.position[0] = gltf_node.*.translation[0];
+                    camera.position[1] = gltf_node.*.translation[1];
+                    camera.position[2] = gltf_node.*.translation[2];
+                }
+
+                var orientation = zm.matToQuat(zm.identity());
+
+                if (gltf_node.*.has_rotation > 0) {
+                    const parent_orientation = zm.f32x4(gltf_node.*.rotation[0], gltf_node.*.rotation[1], gltf_node.*.rotation[2], gltf_node.*.rotation[3]);
+                    orientation = zm.qmul(orientation, parent_orientation);
+                }
+
+                if (child_node.*.has_rotation > 0) {
+                    const child_orientation = zm.f32x4(child_node.*.rotation[0], child_node.*.rotation[1], child_node.*.rotation[2], child_node.*.rotation[3]);
+                    orientation = zm.qmul(orientation, child_orientation);
+                }
+
+                var x: f32 = 0.0;
+                var y: f32 = 0.0;
+                var z: f32 = 0.0;
+                quadToEulerAngles(orientation, &x, &y, &z);
+                camera.pitch = x;
+                camera.yaw = y;
+            }
+
+            // Extract camera info
+            {
+                const gltf_camera = child_node.*.camera;
+                assert(gltf_camera.*.type == c.cgltf_camera_type_perspective);
+
+                const perspective_data = gltf_camera.*.data.perspective;
+
+                camera.yfov = perspective_data.yfov;
+                camera.znear = perspective_data.znear;
+                camera.zfar = 0.0;
+
+                if (perspective_data.has_zfar > 0) {
+                    camera.zfar = perspective_data.zfar;
+                }
+            }
+
+            // Copy camera name for debugging purposes
+            var camera_name_slice = std.mem.span(gltf_node.*.name);
+            camera.name = std.mem.zeroes([s.MAX_NAME_LENGTH]u8);
+            std.mem.copy(u8, &camera.name, camera_name_slice[0..@minimum(camera_name_slice.len, s.MAX_NAME_LENGTH - 1)]);
+
+            // Add camera to scene
+            try scene.cameras.append(camera);
+
+            continue;
+        }
+
         if (gltf_node.*.mesh == null) {
             std.log.debug("Skipping node '{s}' because it doesn't contain a mesh", .{gltf_node.*.name});
             continue;
         }
 
-        const NodeExtras = struct {
-            static: f32,
-        };
+        // Parse node's meshes
+        var node: s.Node = undefined;
+        node.mobility = .Static;
+        var node_name_slice = std.mem.span(gltf_node.*.name);
+
+        // Copy node name for debugging purposes
+        node.name = std.mem.zeroes([s.MAX_NAME_LENGTH]u8);
+        std.mem.copy(u8, &node.name, node_name_slice[0..@minimum(node_name_slice.len, s.MAX_NAME_LENGTH - 1)]);
 
         var extra_size: c.cgltf_size = 0;
         var extra_result = c.cgltf_copy_extras_json(data, &gltf_node.*.extras, null, &extra_size);
@@ -261,13 +343,14 @@ fn convertGLTFScene(gltf_path: []const u8, arena: std.mem.Allocator, scene: *s.S
             var token_stream = std.json.TokenStream.init(std.mem.sliceAsBytes(std.mem.span(json_string)));
             const extras = try std.json.parse(NodeExtras, &token_stream, .{ .allow_trailing_data = true });
 
-            if (extras.static > 0.0) {
-                node.static_type = .Static;
+            if (extras.static > 0.5) {
+                node.mobility = .Static;
             } else {
-                node.static_type = .Moveable;
+                node.mobility = .Moveable;
             }
         }
 
+        // Parse node's meshes
         var gltf_mesh = gltf_node.*.mesh;
 
         var mesh_name_slice = try std.fmt.allocPrintZ(arena, "{s}", .{gltf_mesh.*.name});
@@ -359,25 +442,25 @@ fn parseArgs(mem_allocator: std.mem.Allocator) !ParsedArguments {
     var result: ParsedArguments = undefined;
 
     while (args_iterator.next()) |arg| {
-        if (std.mem.eql(u8, arg[0 .. arg.len], "-i")) {
+        if (std.mem.eql(u8, arg[0..arg.len], "-i")) {
             result.input_type = .MeshFolder;
             if (args_iterator.next()) |input_path| {
-                result.input_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{input_path[0 .. input_path.len]});
+                result.input_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{input_path[0..input_path.len]});
             } else {
                 printUsage();
                 std.debug.panic("Failed to find input folder", .{});
             }
-        } else if (std.mem.eql(u8, arg[0 .. arg.len], "-s")) {
+        } else if (std.mem.eql(u8, arg[0..arg.len], "-s")) {
             result.input_type = .SceneFile;
             if (args_iterator.next()) |input_path| {
-                result.input_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{input_path[0 .. input_path.len]});
+                result.input_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{input_path[0..input_path.len]});
             } else {
                 printUsage();
                 std.debug.panic("Failed to find scene file", .{});
             }
-        } else if (std.mem.eql(u8, arg[0 .. arg.len], "-o")) {
+        } else if (std.mem.eql(u8, arg[0..arg.len], "-o")) {
             if (args_iterator.next()) |output_path| {
-                result.output_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{output_path[0 .. output_path.len]});
+                result.output_path = try std.fmt.allocPrintZ(mem_allocator, "{s}", .{output_path[0..output_path.len]});
             } else {
                 printUsage();
                 std.debug.panic("Failed to output path", .{});
@@ -435,7 +518,7 @@ pub fn main() !void {
         while (try dir_it.next()) |file| {
             if (file.kind == .File) {
                 if (std.mem.eql(u8, "gltf", file.name[file.name.len - 4 .. file.name.len])) {
-                    var file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/{s}", .{ parsed_arguments.input_path, file.name});
+                    var file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/{s}", .{ parsed_arguments.input_path, file.name });
                     defer gpa_allocator.free(file_path);
 
                     try convertGLTF(file_path, &mesh_data);
@@ -443,7 +526,7 @@ pub fn main() !void {
             }
         }
 
-        var output_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/meshes.bin", .{ parsed_arguments.output_path});
+        var output_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/meshes.bin", .{parsed_arguments.output_path});
         defer gpa_allocator.free(output_file_path);
         var output_file = try std.fs.cwd().createFile(output_file_path, .{ .read = true });
         defer output_file.close();
@@ -463,19 +546,22 @@ pub fn main() !void {
         var scene: s.Scene = .{
             .nodes = std.ArrayList(s.Node).init(gpa_allocator),
             .transforms = std.ArrayList(zm.Mat).init(gpa_allocator),
+            .cameras = std.ArrayList(s.Camera).init(gpa_allocator),
+            .active_camera_index = 0,
         };
         defer scene.nodes.deinit();
         defer scene.transforms.deinit();
+        defer scene.cameras.deinit();
 
         try convertGLTFScene(parsed_arguments.input_path, arena_allocator, &scene, &mesh_data);
 
-        var output_meshes_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/meshes.bin", .{ parsed_arguments.output_path});
+        var output_meshes_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/meshes.bin", .{parsed_arguments.output_path});
         defer gpa_allocator.free(output_meshes_file_path);
         var meshes_file = try std.fs.cwd().createFile(output_meshes_file_path, .{ .read = true });
         defer meshes_file.close();
         try mesh_data.serialize(meshes_file);
 
-        var output_scene_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/scene.bin", .{ parsed_arguments.output_path});
+        var output_scene_file_path = try std.fmt.allocPrintZ(gpa_allocator, "{s}/scene.bin", .{parsed_arguments.output_path});
         defer gpa_allocator.free(output_scene_file_path);
         var scene_file = try std.fs.cwd().createFile(output_scene_file_path, .{ .read = true });
         defer scene_file.close();

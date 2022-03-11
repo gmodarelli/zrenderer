@@ -5,7 +5,7 @@ pub const mesh = @import("mesh.zig");
 pub const MAX_NAME_LENGTH: u32 = 64;
 pub const MAX_NUM_MESHES_PER_NODE: u32 = 8;
 
-pub const NodeStaticType = enum {
+pub const Mobility = enum {
     Static,
     Moveable,
 };
@@ -20,9 +20,23 @@ pub const Node = struct {
     transform_index: u32,
 
     // Whether this node is static or moveable
-    static_type: NodeStaticType,
+    mobility: Mobility,
 
     // Name of this node, used for debug
+    name: [MAX_NAME_LENGTH]u8,
+};
+
+pub const Camera = struct {
+    position: [3]f32,
+    forward: [3]f32,
+    pitch: f32,
+    yaw: f32,
+
+    yfov: f32,
+    zfar: f32,
+    znear: f32,
+
+    // Name of this camera, used for debug
     name: [MAX_NAME_LENGTH]u8,
 };
 
@@ -35,6 +49,9 @@ pub const SceneFileHeader = struct {
 
     // Number of transform descriptors following this header.
     num_transforms: u32,
+
+    // Number of cameras following this header.
+    num_cameras: u32,
 };
 
 // NOTE: For now the scene cannot represent hierarchies (parent - children)
@@ -45,18 +62,30 @@ pub const Scene = struct {
     // List of transforms used by the nodes in this scene
     transforms: std.ArrayList(zm.Mat),
 
+    // Currently Active Camera
+    active_camera_index: u32,
+
+    // List of all cameras in the scene
+    cameras: std.ArrayList(Camera),
+
     pub fn serialize(scene: *Scene, output_file: std.fs.File) !void {
         var scene_file_header: SceneFileHeader = .{
             .magic_value = 0x87654321,
             .num_nodes = @intCast(u32, scene.nodes.items.len),
             .num_transforms = @intCast(u32, scene.transforms.items.len),
+            .num_cameras = @intCast(u32, scene.cameras.items.len),
         };
 
-        var slice = @ptrCast([*]u8, &scene_file_header)[0 .. @sizeOf(SceneFileHeader)];
-        try output_file.writeAll(std.mem.sliceAsBytes(slice));
+        var header_slice = @ptrCast([*]u8, &scene_file_header)[0 .. @sizeOf(SceneFileHeader)];
+        try output_file.writeAll(std.mem.sliceAsBytes(header_slice));
 
         try output_file.writeAll(std.mem.sliceAsBytes(scene.nodes.items[0..]));
         try output_file.writeAll(std.mem.sliceAsBytes(scene.transforms.items[0..]));
+
+        var camera_index_slice = @ptrCast([*]u8, &scene.active_camera_index)[0 .. @sizeOf(u32)];
+        try output_file.writeAll(std.mem.sliceAsBytes(camera_index_slice));
+
+        try output_file.writeAll(std.mem.sliceAsBytes(scene.cameras.items[0..]));
     }
 
     pub fn load(input_file: std.fs.File, allocator: std.mem.Allocator) !Scene {
@@ -70,9 +99,12 @@ pub const Scene = struct {
         var scene: Scene = .{
             .nodes = std.ArrayList(Node).init(allocator),
             .transforms = std.ArrayList(zm.Mat).init(allocator),
+            .active_camera_index = 0,
+            .cameras = std.ArrayList(Camera).init(allocator),
         };
         try scene.nodes.resize(header.num_nodes);
         try scene.transforms.resize(header.num_transforms);
+        try scene.cameras.resize(header.num_cameras);
 
         _ = try input_file.readAll(std.mem.sliceAsBytes(scene.nodes.items[0..]));
         _ = try input_file.readAll(std.mem.sliceAsBytes(scene.transforms.items[0..]));
