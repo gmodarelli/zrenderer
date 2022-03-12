@@ -507,9 +507,7 @@ pub fn main() !void {
             .vertex_data = std.ArrayList(f32).init(gpa_allocator),
             .meshes = std.ArrayList(m.Mesh).init(gpa_allocator),
         };
-        defer mesh_data.index_data.deinit();
-        defer mesh_data.vertex_data.deinit();
-        defer mesh_data.meshes.deinit();
+        defer mesh_data.unload(gpa_allocator);
 
         var dir = try std.fs.cwd().openDir(parsed_arguments.input_path, .{ .iterate = true });
         defer dir.close();
@@ -549,9 +547,7 @@ pub fn main() !void {
             .cameras = std.ArrayList(s.Camera).init(gpa_allocator),
             .active_camera_index = 0,
         };
-        defer scene.nodes.deinit();
-        defer scene.transforms.deinit();
-        defer scene.cameras.deinit();
+        defer scene.unload(gpa_allocator);
 
         try convertGLTFScene(parsed_arguments.input_path, arena_allocator, &scene, &mesh_data);
 

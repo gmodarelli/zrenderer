@@ -109,6 +109,17 @@ pub const Scene = struct {
         _ = try input_file.readAll(std.mem.sliceAsBytes(scene.nodes.items[0..]));
         _ = try input_file.readAll(std.mem.sliceAsBytes(scene.transforms.items[0..]));
 
+        var active_camera_slice = @ptrCast([*]u8, &scene.active_camera_index)[0 .. @sizeOf(u32)];
+        _ = try input_file.readAll(std.mem.asBytes(active_camera_slice));
+
+        _ = try input_file.readAll(std.mem.sliceAsBytes(scene.cameras.items[0..]));
+
         return scene;
+    }
+
+    pub fn unload(scene: *Scene, _: std.mem.Allocator) void {
+        scene.nodes.deinit();
+        scene.transforms.deinit();
+        scene.cameras.deinit();
     }
 };

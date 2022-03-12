@@ -49,7 +49,7 @@ pub fn buildRenderer(b: *Builder, options: Options) void {
     exe_options.addOption(bool, "enable_dx_debug", options.enable_dx_debug);
     exe_options.addOption(bool, "enable_dx_gpu_debug", options.enable_dx_gpu_debug);
     exe_options.addOption(bool, "enable_tracy", options.tracy != null);
-    exe_options.addOption(bool, "enable_d2d", true);
+    exe_options.addOption(bool, "enable_d2d", false);
     exe_options.addOption([]const u8, "content_dir", "content/");
 
     exe.addOptions("build_options", exe_options);
@@ -246,6 +246,23 @@ fn buildShaders(b: *std.build.Builder) *std.build.Step {
         "generate_mipmaps.cs.cso",
         "cs",
         "PSO__GENERATE_MIPMAPS",
+    );
+    dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
+
+    dxc_command = makeDxcCmd(
+        "src/hlsl/uber.hlsl",
+        "vsMain",
+        "uber.vs.cso",
+        "vs",
+        "",
+    );
+    dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
+    dxc_command = makeDxcCmd(
+        "src/hlsl/uber.hlsl",
+        "psMain",
+        "uber.ps.cso",
+        "ps",
+        "",
     );
     dxc_step.dependOn(&b.addSystemCommand(&dxc_command).step);
 
