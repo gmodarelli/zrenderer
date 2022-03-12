@@ -34,18 +34,18 @@ const DemoState = struct {
     normal_tfmt: *dwrite.ITextFormat,
 };
 
-fn init(gpa_allocator: std.mem.Allocator) DemoState {
+fn init(allocator: std.mem.Allocator) DemoState {
     // Create application window and initialize dear imgui library.
-    const window = common.initWindow(gpa_allocator, window_name, window_width, window_height) catch unreachable;
+    const window = common.initWindow(allocator, window_name, window_width, window_height) catch unreachable;
 
     // Create temporary memory allocator for use during initialization. We pass this allocator to all
     // subsystems that need memory and then free everyting with a single deallocation.
-    var arena_allocator_state = std.heap.ArenaAllocator.init(gpa_allocator);
+    var arena_allocator_state = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator_state.deinit();
     const arena_allocator = arena_allocator_state.allocator();
 
     // Create DirectX 12 context.
-    var gctx = zd3d12.GraphicsContext.init(window);
+    var gctx = zd3d12.GraphicsContext.init(allocator, window);
 
     // Enable vsync.
     gctx.present_flags = 0;
@@ -102,13 +102,13 @@ fn init(gpa_allocator: std.mem.Allocator) DemoState {
     };
 }
 
-fn deinit(demo: *DemoState, gpa_allocator: std.mem.Allocator) void {
+fn deinit(demo: *DemoState, allocator: std.mem.Allocator) void {
     demo.gctx.finishGpuCommands();
     _ = demo.brush.Release();
     _ = demo.normal_tfmt.Release();
     demo.guictx.deinit(&demo.gctx);
-    demo.gctx.deinit();
-    common.deinitWindow(gpa_allocator);
+    demo.gctx.deinit(allocator);
+    common.deinitWindow(allocator);
     demo.* = undefined;
 }
 
